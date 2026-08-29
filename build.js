@@ -301,14 +301,12 @@ function tick(){
           }else{v.__speed__=(p.spd||null);}
         }else{v.__speed__=null;}
         _prevClient[key]={lat:lat,lon:lon,t:now,spd:v.__speed__,spd_hist:(p?p.spd_hist:[])};
-        // still-pulls gate (client-side, cold-start safe): if same spot 3+ polls -> mark __still
-        var sp=_stillClient[key];
-        if(p&&dxy2>2.0){ // moved
-          if(sp)_stillClient[key]=0;
-        } else {
-          _stillClient[key]=(sp||0)+1;
-        }
-        if(v.Type==='transit' && (_stillClient[key]||0)>=3) v.__still=true;
+        // still-pulls gate (client-side, cold-start safe): count polls with ~no movement
+        var sp=_stillClient[key]||0;
+        if(p && dxy2>5.0){ sp=0; } // moved >5m -> reset
+        else { sp=sp+1; } // same spot (or first sighting) -> increment
+        _stillClient[key]=sp;
+        if(v.Type==='transit' && sp>=3) v.__still=true;
       }else{delete _prevClient[key];delete _posHist[key];delete _stillClient[key];}
     });
     render(d);if(lastUpd)lastUpd.textContent=new Date().toLocaleTimeString('sl-SI');
