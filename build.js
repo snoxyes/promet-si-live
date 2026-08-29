@@ -134,14 +134,10 @@ var markers={}, _sel=null, followId=null;
 var pendingMarkers=[];
 var LAYERS=(function(){try{return JSON.parse(localStorage.getItem('laguna_layers')||'null')||{taxi:true,transit:true,routes:true,micro:true};}catch(e){return {taxi:true,transit:true,routes:true,micro:true};}})();
 function layerFor(v){if(v.Type==='transit')return 'transit';if(v.Type==='micro')return 'micro';return 'taxi';}
-// "routes" is a derived view of transit (grouped by line) -> when routes layer is on, hide raw transit markers
-function isLayerOn(v){
-  if(v.Type==='transit'){
-    if(LAYERS.routes===true) return false; // routes view replaces raw transit
-    return LAYERS.transit!==false;
-  }
-  return LAYERS[layerFor(v)]!==false;
-}
+// routes is a SIDEBAR-only view (grouped lines); it must NOT hide transit markers on the map
+function isLayerOn(v){return LAYERS[layerFor(v)]!==false;}
+// routes filter state (independent of map markers)
+function routesOn(){return LAYERS.routes!==false;}
 function toggleLayer(name){LAYERS[name]=!LAYERS[name];localStorage.setItem('laguna_layers',JSON.stringify(LAYERS));
   document.querySelectorAll('#filters .fbtn').forEach(function(b){b.classList.toggle('active',LAYERS[b.dataset.layer]);});render(_data);}
 document.querySelectorAll('#filters .fbtn').forEach(function(b){b.classList.toggle('active',LAYERS[b.dataset.layer]);});
@@ -243,8 +239,9 @@ function render(data){_data=data;var list=document.getElementById('list'),stats=
   Object.keys(markers).forEach(function(k){if(!seen[k]){map.removeLayer(markers[k]);delete markers[k];}});
   var sideHtml2='';sideData.forEach(function(v){if(isLayerOn(v))sideHtml2+=row(v);});
   // ROUTES view: group transit vehicles by line (route+headsign) into a "vozni red" list
-  if(LAYERS.routes===true){
-    var lines={}, lineCount=0;
+  var lineCount=0;
+  if(routesOn()){
+    var lines={};
     data.forEach(function(v){
       if(v.Type!=='transit')return;
       var t=v.__transit__||{};
@@ -280,7 +277,7 @@ function render(data){_data=data;var list=document.getElementById('list'),stats=
     +'<div class=stat><b>'+transit+'</b><span>javni</span></div>'
     +'<div class=stat><b>'+micro+'</b><span>vozni red</span></div>';
   var cT=document.getElementById('cnt-taxi'),cTr=document.getElementById('cnt-transit'),cM=document.getElementById('cnt-routes');
-  if(cT)cT.textContent=taxiCount;if(cTr)cTr.textContent=transit;if(cM)cM.textContent=micro;
+  if(cT)cT.textContent=taxiCount;if(cTr)cTr.textContent=transit;if(cM)cM.textContent=lineCount;
   filter();
   if(followId&&markers[followId]){map.panTo(markers[followId].getLatLng(),{animate:false});
     var fEl=document.getElementById('followBadge');if(fEl){var fv=markers[followId]._taxi;fEl.style.display='flex';
