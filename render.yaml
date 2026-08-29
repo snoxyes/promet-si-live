@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: promet-si-live
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: "npm install"
+    startCommand: "node server.js"
+    healthCheckPath: /laguna_dashboard.html
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: LAGUNA_INTERVAL
+        value: "20"

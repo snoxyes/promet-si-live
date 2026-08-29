@@ -1,0 +1,13 @@
+{
+  "name": "promet-si-live",
+  "version": "1.0.0",
+  "description": "Promet SI LIVE - multi-operator GPS dashboard (Node.js port)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}

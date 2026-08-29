@@ -1,0 +1,5 @@
+node_modules/
+laguna_data.json
+laguna_dashboard.html
+npm-debug.log*
+.DS_Store
