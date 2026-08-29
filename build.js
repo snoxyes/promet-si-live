@@ -207,8 +207,11 @@ function render(data){_data=data;var list=document.getElementById('list'),stats=
   var seen={},gps=0,opc={},transit=0,micro=0;
   var sideData=data.slice().sort(function(a,b){return (b.__speed__||0)-(a.__speed__||0);});
   pendingMarkers.length=0;var sideHtml='';
-  data.forEach(function(v){if(!isLayerOn(v))return;var hasPos=v.Position&&v.Lat!=null&&v.Lon!=null;var key=v.__op__+':'+v.Id;seen[key]=true;
-    if(hasPos){gps++;var op=v.__op__;opc[op]=(opc[op]||0)+1;if(v.Type==='transit')transit++;if(v.Type==='micro')micro++;
+  data.forEach(function(v){
+    if(v.Type==='transit')transit++;
+    else if(v.Type==='micro')micro++;
+    if(!isLayerOn(v))return;var hasPos=v.Position&&v.Lat!=null&&v.Lon!=null;var key=v.__op__+':'+v.Id;seen[key]=true;
+    if(hasPos){gps++;var op=v.__op__;opc[op]=(opc[op]||0)+1;
       var fill=FILLHEX[STATUS_FILL[v.Status]||'gray']||'#64748b',ring=OP_COLOR[op]||'#fff';var lab=v.Title||v.Imsi||('#'+v.Id),st=STATUS_LABEL[v.Status]||('St:'+v.Status);
       var icon=L.divIcon({className:'',html:pin(v),iconSize:[30,46],iconAnchor:[15,26]});var popup;
       if(v.Type==='transit'){var t=v.__transit__||{};
