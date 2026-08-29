@@ -108,7 +108,7 @@ const HTML = `<!DOCTYPE html>
 <div id="app">
   <div id="sidebar">
     <div id="topbar">
-      <h1>🚦 Promet SI <span class="live">LIVE</span><small>vozila v realnem času</small></h1>
+      <h1>🚦 Promet SI <span class="live">LIVE</span><small>vozila v realnem času · V3.0</small></h1>
       <div class="stats" id="stats"></div>
       <div class="search-wrap">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
@@ -117,7 +117,7 @@ const HTML = `<!DOCTYPE html>
       <div class="filter-row" id="filters">
         <button class="fbtn active" data-layer="taxi" onclick="toggleLayer('taxi')"><span class="emo">🚕</span> Taxi <i id="cnt-taxi">0</i></button>
         <button class="fbtn active" data-layer="transit" onclick="toggleLayer('transit')"><span class="emo">🚌</span> Javni <i id="cnt-transit">0</i></button>
-        <button class="fbtn active" data-layer="micro" onclick="toggleLayer('micro')"><span class="emo">🛴</span> MO-Izposoja <i id="cnt-micro">0</i></button>
+        <button class="fbtn active" data-layer="routes" onclick="toggleLayer('routes')"><span class="emo">📋</span> Vozni red <i id="cnt-routes">0</i></button>
       </div>
     </div>
     <div id="list"></div>
@@ -132,9 +132,16 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{
   {maxZoom:20,subdomains:'abcd',pane:'shadowPane',opacity:.9}).addTo(map);
 var markers={}, _sel=null, followId=null;
 var pendingMarkers=[];
-var LAYERS=(function(){try{return JSON.parse(localStorage.getItem('laguna_layers')||'null')||{taxi:true,transit:true,micro:true};}catch(e){return {taxi:true,transit:true,micro:true};}})();
+var LAYERS=(function(){try{return JSON.parse(localStorage.getItem('laguna_layers')||'null')||{taxi:true,transit:true,routes:true,micro:true};}catch(e){return {taxi:true,transit:true,routes:true,micro:true};}})();
 function layerFor(v){if(v.Type==='transit')return 'transit';if(v.Type==='micro')return 'micro';return 'taxi';}
-function isLayerOn(v){return LAYERS[layerFor(v)]!==false;}
+// "routes" is a derived view of transit (grouped by line) -> when routes layer is on, hide raw transit markers
+function isLayerOn(v){
+  if(v.Type==='transit'){
+    if(LAYERS.routes===true) return false; // routes view replaces raw transit
+    return LAYERS.transit!==false;
+  }
+  return LAYERS[layerFor(v)]!==false;
+}
 function toggleLayer(name){LAYERS[name]=!LAYERS[name];localStorage.setItem('laguna_layers',JSON.stringify(LAYERS));
   document.querySelectorAll('#filters .fbtn').forEach(function(b){b.classList.toggle('active',LAYERS[b.dataset.layer]);});render(_data);}
 document.querySelectorAll('#filters .fbtn').forEach(function(b){b.classList.toggle('active',LAYERS[b.dataset.layer]);});
@@ -232,6 +239,35 @@ function render(data){_data=data;var list=document.getElementById('list'),stats=
     }else{sideHtml+=rowNoGps(v);}});
   Object.keys(markers).forEach(function(k){if(!seen[k]){map.removeLayer(markers[k]);delete markers[k];}});
   var sideHtml2='';sideData.forEach(function(v){if(isLayerOn(v))sideHtml2+=row(v);});
+  // ROUTES view: group transit vehicles by line (route+headsign) into a "vozni red" list
+  if(LAYERS.routes===true){
+    var lines={}, lineCount=0;
+    data.forEach(function(v){
+      if(v.Type!=='transit')return;
+      var t=v.__transit__||{};
+      var route=t.route||'B', hs=t.headsign||'-', op=t.operator||'Javni Promet';
+      var lk=op+'|'+route+'|'+hs;
+      if(!lines[lk]){lines[lk]={operator:op,route:route,headsign:hs,color:t.color,buses:0,maxSpd:0};lineCount++;}
+      lines[lk].buses++;
+      if(v.__speed__!=null&&v.__speed__>lines[lk].maxSpd)lines[lk].maxSpd=v.__speed__;
+    });
+    var lineArr=Object.values(lines).sort(function(a,b){return (b.buses-a.buses)|| a.route.localeCompare(b.route);});
+    var routeHtml='';
+    lineArr.forEach(function(L){
+      // split headsign "A - B - C" -> from/to
+      var parts=L.headsign.split(' - ');
+      var from=parts[0]||L.headsign, to=parts[parts.length-1]||L.headsign;
+      var spd=L.maxSpd>1?L.maxSpd.toFixed(0)+' km/h':'stoji';
+      routeHtml+='<div class="veh" style="cursor:default">'
+        +'<div class="pin transit-pin" style="background:'+(L.color||'#3b82f6')+';border-color:'+(L.color||'#3b82f6')+'"><span>'+L.route+'</span></div>'
+        +'<div class="vinfo"><div class="vrow1"><span class="vname">'+L.route+' · '+L.operator+'</span>'
+        +'<span class="vop">'+L.buses+' bus'+(L.buses>1?'i':'')+'</span></div>'
+        +'<div class="vrow2" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+        +'<span>'+from+' → '+to+'</span><span>'+spd+'</span></div>'
+        +'<div class="vrow2" style="font-size:10px;color:#8a93a0">real-time (brez urnika)</div></div></div>';
+    });
+    sideHtml2='<div style="padding:8px 10px;font-size:11px;color:#5a6675;font-weight:600">AKTIVNE VOZNE LINIJE ('+lineCount+')</div>'+routeHtml;
+  }
   list.innerHTML=sideHtml2+sideHtml;flushMarkers();
   var ops=Object.keys(opc).map(function(o){return '<span class="op-tag"><i style="background:'+(OP_COLOR[o]||'#fff')+'"></i>'+o+' '+opc[o]+'</span>';}).join(' ');
   var free=0;data.forEach(function(v){if(v.Type!=='transit'&&v.Status===0)free++;});
@@ -239,8 +275,8 @@ function render(data){_data=data;var list=document.getElementById('list'),stats=
   stats.innerHTML='<div class=stat><b>'+data.length+'</b><span>vozila</span></div>'
     +'<div class=stat><b>'+taxiCount+'</b><span>taxi</span></div>'
     +'<div class=stat><b>'+transit+'</b><span>javni</span></div>'
-    +'<div class=stat><b>'+micro+'</b><span>MO-Izposoja</span></div>';
-  var cT=document.getElementById('cnt-taxi'),cTr=document.getElementById('cnt-transit'),cM=document.getElementById('cnt-micro');
+    +'<div class=stat><b>'+micro+'</b><span>vozni red</span></div>';
+  var cT=document.getElementById('cnt-taxi'),cTr=document.getElementById('cnt-transit'),cM=document.getElementById('cnt-routes');
   if(cT)cT.textContent=taxiCount;if(cTr)cTr.textContent=transit;if(cM)cM.textContent=micro;
   filter();
   if(followId&&markers[followId]){map.panTo(markers[followId].getLatLng(),{animate:false});
