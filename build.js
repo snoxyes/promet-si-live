@@ -117,7 +117,7 @@ const HTML = `<!DOCTYPE html>
       <div class="filter-row" id="filters">
         <button class="fbtn active" data-layer="taxi" onclick="toggleLayer('taxi')"><span class="emo">🚕</span> Taxi <i id="cnt-taxi">0</i></button>
         <button class="fbtn active" data-layer="transit" onclick="toggleLayer('transit')"><span class="emo">🚌</span> Javni <i id="cnt-transit">0</i></button>
-        <button class="fbtn active" data-layer="routes" onclick="toggleLayer('routes')"><span class="emo">📋</span> Vozni red <i id="cnt-routes">0</i></button>
+        <button class="fbtn active" data-layer="micro" onclick="toggleLayer('micro')"><span class="emo">🛴</span> MO-Izposoja <i id="cnt-micro">0</i></button>
       </div>
     </div>
     <div id="list"></div>
@@ -132,26 +132,9 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{
   {maxZoom:20,subdomains:'abcd',pane:'shadowPane',opacity:.9}).addTo(map);
 var markers={}, _sel=null, followId=null;
 var pendingMarkers=[];
-var LAYERS=(function(){try{return JSON.parse(localStorage.getItem('laguna_layers')||'null')||{taxi:true,transit:true,routes:true,micro:true};}catch(e){return {taxi:true,transit:true,routes:true,micro:true};}})();
+var LAYERS=(function(){try{return JSON.parse(localStorage.getItem('laguna_layers')||'null')||{taxi:true,transit:true,micro:true};}catch(e){return {taxi:true,transit:true,micro:true};}})();
 function layerFor(v){if(v.Type==='transit')return 'transit';if(v.Type==='micro')return 'micro';return 'taxi';}
-// routes is a SIDEBAR-only view (grouped lines); it must NOT hide transit markers on the map
 function isLayerOn(v){return LAYERS[layerFor(v)]!==false;}
-// routes filter state (independent of map markers)
-function routesOn(){return LAYERS.routes!==false;}
-var _lineFilter=null; // "operator|route|headsign" when a line is selected in VOZNI RED view
-function focusLine(lk){_lineFilter=lk;render(_data);
-  // zoom map to center of this line's buses
-  if(_data){
-    var pts=_data.filter(function(v){return v.Type==='transit'&&v.Lat!=null&&v.Lon!=null
-      && (v.__op__+'|'+(v.__transit__?v.__transit__.route:'')+'|'+(v.__transit__?v.__transit__.headsign:''))===lk;});
-    if(pts.length){var clat=0,clon=0;pts.forEach(function(p){clat+=p.Lat;clon+=p.Lon;});
-      clat/=pts.length;clon/=pts.length;
-      map.flyTo([clat,clon], Math.max(12, Math.min(15, 16-Math.log2(pts.length))), {duration:.9});
-    }
-  }
-  map.invalidateSize();
-}
-function clearLine(){_lineFilter=null;render(_data);}
 function toggleLayer(name){LAYERS[name]=!LAYERS[name];localStorage.setItem('laguna_layers',JSON.stringify(LAYERS));
   document.querySelectorAll('#filters .fbtn').forEach(function(b){b.classList.toggle('active',LAYERS[b.dataset.layer]);});render(_data);}
 document.querySelectorAll('#filters .fbtn').forEach(function(b){b.classList.toggle('active',LAYERS[b.dataset.layer]);});
@@ -220,7 +203,9 @@ function render(data){_data=data;var list=document.getElementById('list'),stats=
   data.forEach(function(v){
     if(v.Type==='transit')transit++;
     else if(v.Type==='micro')micro++;
-    if(!isLayerOn(v))return;var hasPos=v.Position&&v.Lat!=null&&v.Lon!=null;var key=v.__op__+':'+v.Id;seen[key]=true;
+    if(!isLayerOn(v))return;
+    if(v.Type==='transit'&&v.__still)return; // client-side still-pulls gate (stuck >~60s)
+var hasPos=v.Position&&v.Lat!=null&&v.Lon!=null;var key=v.__op__+':'+v.Id;seen[key]=true;
     if(hasPos){gps++;var op=v.__op__;opc[op]=(opc[op]||0)+1;
       var fill=FILLHEX[STATUS_FILL[v.Status]||'gray']||'#64748b',ring=OP_COLOR[op]||'#fff';var lab=v.Title||v.Imsi||('#'+v.Id),st=STATUS_LABEL[v.Status]||('St:'+v.Status);
       var icon=L.divIcon({className:'',html:pin(v),iconSize:[30,46],iconAnchor:[15,26]});var popup;
@@ -248,57 +233,10 @@ function render(data){_data=data;var list=document.getElementById('list'),stats=
         +'<div>Smer: <span class="hl">'+rot(v.Heading)+'°</span></div>'
         +'<div>GPS: <span class="hl">'+v.Lat.toFixed(5)+', '+v.Lon.toFixed(5)+'</span></div>'
         +'<div style="color:#5b6472">ID '+v.Id+' · Imsi '+(v.Imsi||'-')+'</div></div>';}
-      if(_lineFilter){
-        var lk=v.__op__+'|'+(v.__transit__?v.__transit__.route:'')+'|'+(v.__transit__?v.__transit__.headsign:'');
-        if(lk!==_lineFilter) return;
-      }
       pendingMarkers.push({key:key,lat:v.Lat,lon:v.Lon,icon:icon,popup:popup,op:v.__op__,id:v.Id});
     }else{sideHtml+=rowNoGps(v);}});
   Object.keys(markers).forEach(function(k){if(!seen[k]){map.removeLayer(markers[k]);delete markers[k];}});
   var sideHtml2='';sideData.forEach(function(v){if(isLayerOn(v))sideHtml2+=row(v);});
-  // ROUTES view: group transit vehicles by line (route+headsign) into a "vozni red" list
-  var lineCount=0;
-  if(routesOn()){
-    var lines={};
-    var nowTs=Date.now()/1000;
-    data.forEach(function(v){
-      if(v.Type!=='transit')return;
-      var t=v.__transit__||{};
-      var route=t.route||'B', hs=t.headsign||'-', op=t.operator||'Javni Promet';
-      var lk=op+'|'+route+'|'+hs;
-      if(!lines[lk]){lines[lk]={operator:op,route:route,headsign:hs,color:t.color,buses:0,maxSpd:0,minSpd:999,sumSpd:0,lastTs:0};lineCount++;}
-      var L=lines[lk];
-      L.buses++;
-      var sp=v.__speed__!=null?v.__speed__:0;
-      if(sp>L.maxSpd)L.maxSpd=sp;
-      if(sp<L.minSpd)L.minSpd=sp;
-      L.sumSpd+=sp;
-      var ts=(t.ts||0); if(ts>L.lastTs)L.lastTs=ts;
-    });
-    // sort by avg speed desc (A)
-    var lineArr=Object.values(lines).sort(function(a,b){var as=a.sumSpd/a.buses, bs=b.sumSpd/b.buses;return bs-as || (b.buses-a.buses);});
-    var routeHtml='';
-    lineArr.forEach(function(L){
-      // split headsign "A - B - C" -> from / via / to (B)
-      var parts=L.headsign.split(' - ');
-      var from=parts[0]||L.headsign, to=parts[parts.length-1]||L.headsign;
-      var via=parts.length>2?parts.slice(1,-1).join(' · '):'';
-      var spdTxt=L.maxSpd>1?L.maxSpd.toFixed(0)+' km/h':'stoji';
-      // freshness (D): seconds since last data point
-      var age=nowTs-L.lastTs; var ageTxt=age>0?('pred '+Math.round(age)+'s'):'';
-      var lkEsc=L.operator+'|'+L.route+'|'+L.headsign;
-      routeHtml+='<div class="veh" style="cursor:pointer" onclick="focusLine('+"'"+lkEsc.replace(/'/g,"\\'")+"'"+')">'
-        +'<div class="pin transit-pin" style="background:'+(L.color||'#3b82f6')+';border-color:'+(L.color||'#3b82f6')+'"><span>'+L.route+'</span></div>'
-        +'<div class="vinfo"><div class="vrow1"><span class="vname">'+L.route+' · '+L.operator+'</span>'
-        +'<span class="vop">'+L.buses+' bus'+(L.buses>1?'i':'')+'</span></div>'
-        +'<div class="vrow2" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
-        +'<span>'+from+' → '+to+'</span><span>'+spdTxt+'</span></div>'
-        +(via?'<div class="vrow2" style="font-size:10px;color:#8a93a0">via: '+via+'</div>':'')
-        +'<div class="vrow2" style="font-size:10px;color:#8a93a0">'+ageTxt+'</div></div></div>';
-    });
-    var clr=_lineFilter?'<div style="padding:6px 10px"><button onclick="clearLine()" style="width:100%;padding:6px;border:1px solid var(--acc);background:rgba(31,122,224,.1);color:var(--acc);border-radius:8px;font-weight:700;cursor:pointer">✕ Prikaži vse linije</button></div>':'';
-    sideHtml2='<div style="padding:8px 10px;font-size:11px;color:#5a6675;font-weight:600">AKTIVNE VOZNE LINIJE ('+lineCount+') · razvrščeno po hitrosti</div>'+clr+routeHtml;
-  }
   list.innerHTML=sideHtml2+sideHtml;flushMarkers();
   var ops=Object.keys(opc).map(function(o){return '<span class="op-tag"><i style="background:'+(OP_COLOR[o]||'#fff')+'"></i>'+o+' '+opc[o]+'</span>';}).join(' ');
   var free=0;data.forEach(function(v){if(v.Type!=='transit'&&v.Status===0)free++;});
@@ -306,9 +244,9 @@ function render(data){_data=data;var list=document.getElementById('list'),stats=
   stats.innerHTML='<div class=stat><b>'+data.length+'</b><span>vozila</span></div>'
     +'<div class=stat><b>'+taxiCount+'</b><span>taxi</span></div>'
     +'<div class=stat><b>'+transit+'</b><span>javni</span></div>'
-    +'<div class=stat><b>'+micro+'</b><span>vozni red</span></div>';
-  var cT=document.getElementById('cnt-taxi'),cTr=document.getElementById('cnt-transit'),cM=document.getElementById('cnt-routes');
-  if(cT)cT.textContent=taxiCount;if(cTr)cTr.textContent=transit;if(cM)cM.textContent=lineCount;
+    +'<div class=stat><b>'+micro+'</b><span>MO-Izposoja</span></div>';
+  var cT=document.getElementById('cnt-taxi'),cTr=document.getElementById('cnt-transit'),cM=document.getElementById('cnt-micro');
+  if(cT)cT.textContent=taxiCount;if(cTr)cTr.textContent=transit;if(cM)cM.textContent=micro;
   filter();
   if(followId&&markers[followId]){map.panTo(markers[followId].getLatLng(),{animate:false});
     var fEl=document.getElementById('followBadge');if(fEl){var fv=markers[followId]._taxi;fEl.style.display='flex';
@@ -329,7 +267,7 @@ function filter(){var q=document.getElementById('search').value.toLowerCase().tr
     if(matches.length===1){var sid=matches[0].id.replace(/^side_/,'');var parts=sid.split('_');focusVeh(parts[0],parseInt(parts[1]));}}}
 var lastUpd=document.getElementById('updtxt');
 map.on('click',function(e){if(followId)stopFollow();});
-var _prevClient={}, _posHist={};
+var _prevClient={}, _posHist={}, _stillClient={};
 function tick(){
   fetch('${DATA_URL}?_='+Date.now()).then(function(r){return r.json();}).then(function(d){
     var now=Date.now()/1000;
@@ -363,7 +301,15 @@ function tick(){
           }else{v.__speed__=(p.spd||null);}
         }else{v.__speed__=null;}
         _prevClient[key]={lat:lat,lon:lon,t:now,spd:v.__speed__,spd_hist:(p?p.spd_hist:[])};
-      }else{delete _prevClient[key];delete _posHist[key];}
+        // still-pulls gate (client-side, cold-start safe): if same spot 3+ polls -> mark __still
+        var sp=_stillClient[key];
+        if(p&&dxy2>2.0){ // moved
+          if(sp)_stillClient[key]=0;
+        } else {
+          _stillClient[key]=(sp||0)+1;
+        }
+        if(v.Type==='transit' && (_stillClient[key]||0)>=3) v.__still=true;
+      }else{delete _prevClient[key];delete _posHist[key];delete _stillClient[key];}
     });
     render(d);if(lastUpd)lastUpd.textContent=new Date().toLocaleTimeString('sl-SI');
   }).catch(function(e){});
