@@ -262,9 +262,46 @@ function filter(){var q=document.getElementById('search').value.toLowerCase().tr
     if(matches.length===1){var sid=matches[0].id.replace(/^side_/,'');var parts=sid.split('_');focusVeh(parts[0],parseInt(parts[1]));}}}
 var lastUpd=document.getElementById('updtxt');
 map.on('click',function(e){if(followId)stopFollow();});
+var _prevClient={}, _posHist={};
 function tick(){
-  fetch('${DATA_URL}?_='+Date.now()).then(function(r){return r.json();}).then(function(d){render(d);if(lastUpd)lastUpd.textContent=new Date().toLocaleTimeString('sl-SI');}).catch(function(e){});
+  fetch('${DATA_URL}?_='+Date.now()).then(function(r){return r.json();}).then(function(d){
+    var now=Date.now()/1000;
+    d.forEach(function(v){
+      var key=v.__op__+':'+v.Id;
+      var p=_prevClient[key];
+      if(v.Lat!=null&&v.Lon!=null){
+        var lat=v.Lat, lon=v.Lon;
+        // teleport rejection: jump >300m in <15s -> keep last good pos
+        if(p&&p.lat!=null){
+          var dt=now-p.t, dxy=haversineC(p.lat,p.lon,lat,lon);
+          if(dt>0.3&&dt<15&&dxy>300){lat=p.lat;lon=p.lon;}
+        }
+        // position smoothing: median of last 5 points removes left-right jitter
+        var hist=_posHist[key]||[];hist=hist.concat([[lat,lon]]);if(hist.length>5)hist=hist.slice(-5);
+        _posHist[key]=hist;
+        if(hist.length>=3){
+          var ml=hist.map(function(h){return h[0];}).sort(function(a,b){return a-b;})[Math.floor(hist.length/2)];
+          var mo=hist.map(function(h){return h[1];}).sort(function(a,b){return a-b;})[Math.floor(hist.length/2)];
+          lat=ml;lon=mo;
+        }
+        v.Lat=lat;v.Lon=lon;
+        if(p){
+          var dt2=now-p.t, dxy2=haversineC(p.lat,p.lon,lat,lon);
+          if(dt2>0.3&&dxy2>2.0){
+            var s=dxy2/dt2*3.6;
+            if(s<=110&&!(p.spd!=null&&p.spd>5&&s>1.8*p.spd)){
+              v.__speed__=p.spd_hist.length>=2?Math.max(0,(p.spd_hist.reduce(function(a,b){return a+b;},0)/p.spd_hist.length+s)/2):s;
+              var sh=p.spd_hist.concat([s]);if(sh.length>6)sh=sh.slice(-6);p.spd_hist=sh;
+            }else{v.__speed__=p.spd;}
+          }else{v.__speed__=(p.spd||null);}
+        }else{v.__speed__=null;}
+        _prevClient[key]={lat:lat,lon:lon,t:now,spd:v.__speed__,spd_hist:(p?p.spd_hist:[])};
+      }else{delete _prevClient[key];delete _posHist[key];}
+    });
+    render(d);if(lastUpd)lastUpd.textContent=new Date().toLocaleTimeString('sl-SI');
+  }).catch(function(e){});
 }
+function haversineC(lat1,lon1,lat2,lon2){var R=6371000.0,p1=lat1*Math.PI/180,p2=lat2*Math.PI/180,dp=(lat2-lat1)*Math.PI/180,dl=(lon2-lon1)*Math.PI/180,a=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;return 2*R*Math.asin(Math.sqrt(a));}
 tick();setInterval(tick,${INTERVAL * 1000});
 </script>
 </body>
