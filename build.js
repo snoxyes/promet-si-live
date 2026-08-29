@@ -139,7 +139,18 @@ function isLayerOn(v){return LAYERS[layerFor(v)]!==false;}
 // routes filter state (independent of map markers)
 function routesOn(){return LAYERS.routes!==false;}
 var _lineFilter=null; // "operator|route|headsign" when a line is selected in VOZNI RED view
-function focusLine(lk){_lineFilter=lk;render(_data);map.invalidateSize();}
+function focusLine(lk){_lineFilter=lk;render(_data);
+  // zoom map to center of this line's buses
+  if(_data){
+    var pts=_data.filter(function(v){return v.Type==='transit'&&v.Lat!=null&&v.Lon!=null
+      && (v.__op__+'|'+(v.__transit__?v.__transit__.route:'')+'|'+(v.__transit__?v.__transit__.headsign:''))===lk;});
+    if(pts.length){var clat=0,clon=0;pts.forEach(function(p){clat+=p.Lat;clon+=p.Lon;});
+      clat/=pts.length;clon/=pts.length;
+      map.flyTo([clat,clon], Math.max(12, Math.min(15, 16-Math.log2(pts.length))), {duration:.9});
+    }
+  }
+  map.invalidateSize();
+}
 function clearLine(){_lineFilter=null;render(_data);}
 function toggleLayer(name){LAYERS[name]=!LAYERS[name];localStorage.setItem('laguna_layers',JSON.stringify(LAYERS));
   document.querySelectorAll('#filters .fbtn').forEach(function(b){b.classList.toggle('active',LAYERS[b.dataset.layer]);});render(_data);}
