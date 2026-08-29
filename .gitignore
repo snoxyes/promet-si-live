@@ -1,3 +1,4 @@
+dist/
 node_modules/
 laguna_data.json
 laguna_dashboard.html
